@@ -1,0 +1,42 @@
+---
+#info: Login as factory user, add a new sudo user then disable factory user
+
+# remember credentials variables
+- hosts: all
+  gather_facts: false
+  strategy: free
+
+  tasks:
+    - name: Set admin user
+      connection: local
+      shell: echo '{{ ansible_user }}'
+      register: admin_user
+      become: false
+
+    - name: Set admin user password
+      connection: local
+      shell: echo '{{ ansible_password }}'
+      register: admin_pass
+      become: false
+
+# run as factory user and add a new sudo user
+- hosts: all
+  gather_facts: false
+  strategy: free
+  become: yes
+  vars:
+    ansible_user: '{{ im_factory_user }}'
+    ansible_password: '{{ im_factory_password }}'
+    ansible_become_password: '{{ im_factory_password }}'
+
+  tasks:
+    - name: Add sudo user '{{ admin_user.stdout }}'
+      user:
+        name: '{{ admin_user.stdout }}'
+        group: sudo
+        password: "{{ admin_pass.stdout | password_hash('sha512') }}"
+
+    - name: Disable factory user
+      user:
+        name: '{{ ansible_user }}'
+        password: '!'
