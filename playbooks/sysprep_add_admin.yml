@@ -1,42 +1,64 @@
 ---
-#info: Login as factory user, add a new sudo user then disable factory user
+#info: Login as factory user, add a new admin user, then disable factory user
 
-# remember credentials variables
+# save current credentials to variables
+# runs as normal ansible user on localhost, even if the user does not exist yet
 - hosts: all
   gather_facts: false
   strategy: free
+  become: false
 
   tasks:
-    - name: Set admin user
+    - name: Get admin user
       connection: local
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
       shell: echo '{{ ansible_user }}'
-      register: admin_user
-      become: false
+      register: new_admin_user
+      changed_when: false
 
-    - name: Set admin user password
+    - name: Get admin user password
       connection: local
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
       shell: echo '{{ ansible_password }}'
-      register: admin_pass
-      become: false
+      register: new_admin_pass
+      changed_when: false
 
 # run as factory user and add a new sudo user
 - hosts: all
   gather_facts: false
   strategy: free
-  become: yes
+  become: true
   vars:
     ansible_user: '{{ im_factory_user }}'
     ansible_password: '{{ im_factory_password }}'
     ansible_become_password: '{{ im_factory_password }}'
 
   tasks:
-    - name: Add sudo user '{{ admin_user.stdout }}'
-      user:
-        name: '{{ admin_user.stdout }}'
-        group: sudo
-        password: "{{ admin_pass.stdout | password_hash('sha512') }}"
+    - name: Check SSH superuser access
+      wait_for_connection:
+        timeout: 3
+      failed_when: false
+      register: test_ssh_superuser
 
-    - name: Disable factory user
-      user:
-        name: '{{ ansible_user }}'
-        password: '!'
+    - name: Info
+      debug:
+        msg: "factory user is already disabled"
+      when:
+        test_ssh_superuser.msg is defined
+
+    - block:
+        - name: Add new admin user - {{ new_admin_user.stdout }}
+          user:
+            name: '{{ new_admin_user.stdout }}'
+            group: sudo
+            shell: /bin/bash
+            password: "{{ new_admin_pass.stdout | password_hash('sha512') }}"
+
+        - name: Disable factory user - {{ im_factory_user }}
+          user:
+            name: '{{ im_factory_user }}'
+            password: '!'
+      when:
+        test_ssh_superuser.msg is undefined
