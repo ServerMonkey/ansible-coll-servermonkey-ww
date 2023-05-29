@@ -9,6 +9,19 @@
   become: false
 
   tasks:
+    - block:
+        - name: Host has no credentials
+          debug:
+            msg: "Skip, no factory credentials defined"
+
+        - name: Skip host
+          meta: end_host
+      when: >
+        im_factory_user is undefined
+        or im_factory_password is undefined
+        or ansible_user is undefined
+        or ansible_password is undefined
+
     - name: Get admin user
       connection: local
       vars:
@@ -36,6 +49,15 @@
     ansible_become_password: '{{ im_factory_password }}'
 
   tasks:
+    - block:
+        - name: Skip host
+          meta: end_host
+      when: >
+        im_factory_user is undefined
+        or im_factory_password is undefined
+        or ansible_user is undefined
+        or ansible_password is undefined
+
     - name: Check SSH superuser access
       wait_for_connection:
         timeout: 3
@@ -45,20 +67,72 @@
     - name: Info
       debug:
         msg: "factory user is already disabled"
-      when:
-        test_ssh_superuser.msg is defined
+      when: test_ssh_superuser.msg is defined
 
+    # Detect OS
     - block:
-        - name: Add new admin user - {{ new_admin_user.stdout }}
+        - name: Detect OS
+          shell: |
+            if [ -n "$(command -v systeminfo)" ]; then
+                echo "windows"
+            else
+                echo "posix"
+            fi
+          register: os_type
+
+        - debug:
+            msg: "{{ os_type.stdout }}"
+      when: test_ssh_superuser.msg is undefined
+
+    # Posix
+    - block:
+        - name: Add new admin user (Posix)
           user:
             name: '{{ new_admin_user.stdout }}'
             group: sudo
             shell: /bin/bash
             password: "{{ new_admin_pass.stdout | password_hash('sha512') }}"
 
-        - name: Disable factory user - {{ im_factory_user }}
+        - name: Disable factory user (Posix)
           user:
             name: '{{ im_factory_user }}'
             password: '!'
-      when:
+      when: >
         test_ssh_superuser.msg is undefined
+        and os_type.stdout == "posix"
+
+    # Windows
+    - block:
+        - name: Add new local admin and disable factory user (Windows)
+          shell: |
+            # remove useless settings
+            rm -f /etc/passwd || exit 1
+            rm -f /etc/group || exit 1
+            # set correct file permissions
+            find "/home/{{ im_factory_user }}" -type d -exec chmod 770 {} + || exit 1
+            find "/home/{{ im_factory_user }}" -type f -exec chmod 660 {} + || exit 1
+            #
+            # remove old history as a security measure
+            rm -f "/home/{{ im_factory_user }}/.bash_history" || exit 1
+            #
+            # add new user
+            net user {{ new_admin_user.stdout }} {{ new_admin_pass.stdout }} /add || exit 1
+            net localgroup Administrators {{ new_admin_user.stdout }} /add || exit 1
+            #
+            # copy shell profile
+            cp -R  "/home/{{ im_factory_user }}" "/home/{{ new_admin_user.stdout }}" || exit 1
+            chown -R {{ new_admin_user.stdout }} "/home/{{ new_admin_user.stdout }}" || exit 1
+            #
+            # disable user
+            net user {{ im_factory_user }} /active:no || exit 1
+            #
+            # disable autologin
+            regtool set "\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\AutoAdminLogon" 0 || exit 1
+            regtool set "\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\DefaultUserName" "" || exit 1
+            regtool set "\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\DefaultPassword" "" || exit 1
+            logoff console
+          register: add_admin_user
+          failed_when: '"completed successfully" not in add_admin_user.stdout'
+      when: >
+        test_ssh_superuser.msg is undefined
+        and os_type.stdout == "windows"
