@@ -86,20 +86,20 @@
 
     # Posix
     - block:
-        - name: Add new admin user (Posix)
+        - name: Add new admin user
           user:
             name: '{{ new_admin_user.stdout }}'
             group: sudo
             shell: /bin/bash
             password: "{{ new_admin_pass.stdout | password_hash('sha512') }}"
 
-        - name: Disable factory user (Posix)
+        - name: Disable factory user
           user:
             name: '{{ im_factory_user }}'
             password: '!'
-      when: >
-        test_ssh_superuser.msg is undefined
-        and os_type.stdout == "posix"
+      when:
+        - test_ssh_superuser.msg is undefined
+        - os_type.stdout == "posix"
 
     # Windows
     - block:
@@ -112,7 +112,7 @@
             find "/home/{{ im_factory_user }}" -type d -exec chmod 770 {} + || exit 1
             find "/home/{{ im_factory_user }}" -type f -exec chmod 660 {} + || exit 1
             #
-            # remove old history as a security measure
+            # remove old bash history as a security measure
             rm -f "/home/{{ im_factory_user }}/.bash_history" || exit 1
             #
             # add new user
@@ -123,16 +123,19 @@
             cp -R  "/home/{{ im_factory_user }}" "/home/{{ new_admin_user.stdout }}" || exit 1
             chown -R {{ new_admin_user.stdout }} "/home/{{ new_admin_user.stdout }}" || exit 1
             #
-            # disable user
+            # disable factory user
             net user {{ im_factory_user }} /active:no || exit 1
             #
+            # create user profile files
+            systeminfo 1>/dev/null 2>&1 || exit 1
+            #
             # disable autologin
-            regtool set "\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\AutoAdminLogon" 0 || exit 1
-            regtool set "\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\DefaultUserName" "" || exit 1
-            regtool set "\HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\DefaultPassword" "" || exit 1
+            regtool set "\HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\AutoAdminLogon" 0 || exit 1
+            regtool set "\HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\DefaultUserName" "" || exit 1
+            regtool set "\HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\DefaultPassword" "" || exit 1
             logoff console
           register: add_admin_user
           failed_when: '"completed successfully" not in add_admin_user.stdout'
-      when: >
-        test_ssh_superuser.msg is undefined
-        and os_type.stdout == "windows"
+      when:
+        - test_ssh_superuser.msg is undefined
+        - os_type.stdout == "windows"
