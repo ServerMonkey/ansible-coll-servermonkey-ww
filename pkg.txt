@@ -1,0 +1,3 @@
+Version: 0.57
+Ansible-Section: galaxy-playbooks
+Description: Servermonkeys generic sysadmin playbooks

@@ -22,6 +22,19 @@
         or ansible_user is undefined
         or ansible_password is undefined
 
+    - set_fact:
+        info_test_ssh_current_host: "{{ ansible_host }}"
+
+    - name: Check for serious SSH warnings
+      connection: local
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+      shell: |
+        ssh -tt -o batchmode=yes "{{ ansible_user }}@{{ info_test_ssh_current_host }}" 2>&1 | grep -s ^@
+      register: verify_mitm_shell
+      failed_when: verify_mitm_shell.stdout
+      changed_when: false
+
     - name: Get admin user
       connection: local
       vars:
@@ -86,12 +99,18 @@
 
     # Posix
     - block:
+        - name: Add group for new admin user
+          group:
+            name: "{{ new_admin_user.stdout }}"
+            state: present
+
         - name: Add new admin user
           user:
             name: '{{ new_admin_user.stdout }}'
-            group: sudo
+            group: "{{ new_admin_user.stdout }}"
+            groups: sudo
             shell: /bin/bash
-            password: "{{ new_admin_pass.stdout | password_hash('sha512') }}"
+            password: "{{ new_admin_pass.stdout | string | password_hash('sha512') }}"
 
         - name: Disable factory user
           user:
